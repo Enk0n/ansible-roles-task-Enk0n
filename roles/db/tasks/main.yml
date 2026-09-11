@@ -1,0 +1,97 @@
+---
+- name: Fail fast if required DB variables are missing
+  ansible.builtin.assert:
+    that:
+      - db_name is defined
+      - db_user is defined
+      - db_pass is defined
+    fail_msg: "db_name, db_user and db_pass must be provided (e.g. via --extra-vars)."
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install PostgreSQL and required packages
+  ansible.builtin.apt:
+    name:
+      - postgresql
+      - postgresql-contrib
+      - python3-psycopg2
+      - acl
+    state: present
+
+- name: Ensure PostgreSQL is started and enabled
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Locate postgresql.conf
+  ansible.builtin.find:
+    paths: /etc/postgresql
+    patterns: postgresql.conf
+    recurse: true
+  register: pg_conf_find
+
+- name: Locate pg_hba.conf
+  ansible.builtin.find:
+    paths: /etc/postgresql
+    patterns: pg_hba.conf
+    recurse: true
+  register: pg_hba_find
+
+- name: Set config path facts
+  ansible.builtin.set_fact:
+    postgresql_conf_path: "{{ pg_conf_find.files[0].path }}"
+    pg_hba_conf_path: "{{ pg_hba_find.files[0].path }}"
+
+- name: Allow PostgreSQL to listen on all interfaces
+  ansible.builtin.lineinfile:
+    path: "{{ postgresql_conf_path }}"
+    regexp: '^#?listen_addresses\s*='
+    line: "listen_addresses = '*'"
+  notify: restart postgresql
+
+- name: Allow remote connections from the application (server) host
+  ansible.builtin.lineinfile:
+    path: "{{ pg_hba_conf_path }}"
+    line: "host    {{ db_name }}    {{ db_user }}    {{ hostvars[groups['server'][0]]['ansible_default_ipv4']['address'] | default(groups['server'][0]) }}/32    md5"
+    insertafter: EOF
+  when: "'server' in groups and groups['server'] | length > 0"
+  notify: restart postgresql
+  # NOTE: default Debian/Ubuntu installs already ship a
+  # "host all all 127.0.0.1/32 scram-sha-256" rule, so connections made to
+  # "localhost" (e.g. when server and db happen to be the same machine, as
+  # in a local test run) already work without this extra rule. This rule
+  # is what makes a *real* two-host deployment work, where the app
+  # connects over the network from the [server] host's real IP.
+
+- name: Flush handlers so PostgreSQL config is reloaded before creating objects
+  ansible.builtin.meta: flush_handlers
+
+- name: Create application database user
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ db_user }}"
+    password: "{{ db_pass }}"
+    encrypted: true
+    state: present
+
+- name: Create application database
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_db:
+    name: "{{ db_name }}"
+    owner: "{{ db_user }}"
+    state: present
+
+- name: Grant all privileges on the database to the application user
+  become: true
+  become_user: postgres
+  community.postgresql.postgresql_privs:
+    database: "{{ db_name }}"
+    roles: "{{ db_user }}"
+    type: database
+    privs: ALL

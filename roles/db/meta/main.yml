@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: db
+  author: Enk0n
+  description: Installs and configures PostgreSQL and creates the application database/user
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+  galaxy_tags:
+    - postgresql
+    - database
+
+dependencies: []

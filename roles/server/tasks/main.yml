@@ -1,0 +1,164 @@
+---
+- name: Fail fast if required DB connection variables are missing
+  ansible.builtin.assert:
+    that:
+      - db_host is defined
+      - db_name is defined
+      - db_user is defined
+      - db_pass is defined
+    fail_msg: "db_host, db_name, db_user and db_pass must be provided (e.g. via --extra-vars)."
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install Apache, PHP and required extensions
+  ansible.builtin.apt:
+    name:
+      - apache2
+      - git
+      - unzip
+      - curl
+      - composer
+      - php
+      - php-cli
+      - php-common
+      - php-pgsql
+      - php-mbstring
+      - php-xml
+      - php-bcmath
+      - php-curl
+      - php-zip
+      - php-tokenizer
+      - libapache2-mod-php
+    state: present
+
+- name: Add NodeSource APT signing key and repository for Node.js {{ nodejs_major_version }}.x
+  ansible.builtin.shell: |
+    curl -fsSL https://deb.nodesource.com/setup_{{ nodejs_major_version }}.x | bash -
+  args:
+    creates: "/etc/apt/sources.list.d/nodesource.list"
+
+- name: Install Node.js (provides npm) - required for building front-end assets with Vite
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+
+- name: Enable Apache rewrite module
+  community.general.apache2_module:
+    name: rewrite
+    state: present
+  notify: restart apache
+
+- name: Ensure /var/www exists
+  ansible.builtin.file:
+    path: /var/www
+    state: directory
+    mode: '0755'
+
+- name: Clone the application repository
+  ansible.builtin.git:
+    repo: "{{ app_repo }}"
+    dest: "{{ app_dir }}"
+    version: "{{ app_repo_version }}"
+    force: true
+
+- name: Copy .env from .env.example (only if .env does not exist yet)
+  ansible.builtin.copy:
+    src: "{{ app_dir }}/.env.example"
+    dest: "{{ app_dir }}/.env"
+    remote_src: true
+    force: false
+
+- name: Configure database connection in .env
+  ansible.builtin.lineinfile:
+    path: "{{ app_dir }}/.env"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+  loop:
+    - { key: "DB_CONNECTION", value: "pgsql" }
+    - { key: "DB_HOST", value: "{{ db_host }}" }
+    - { key: "DB_PORT", value: "{{ db_port }}" }
+    - { key: "DB_DATABASE", value: "{{ db_name }}" }
+    - { key: "DB_USERNAME", value: "{{ db_user }}" }
+    - { key: "DB_PASSWORD", value: "{{ db_pass }}" }
+  no_log: true
+
+- name: Install PHP dependencies with Composer
+  community.general.composer:
+    command: install
+    working_dir: "{{ app_dir }}"
+    no_dev: true
+    prefer_dist: true
+  environment:
+    COMPOSER_ALLOW_SUPERUSER: "1"
+
+- name: Generate the Laravel application key (skipped if already set)
+  ansible.builtin.command: php artisan key:generate --force
+  args:
+    chdir: "{{ app_dir }}"
+  register: key_generate
+  changed_when: "'Application key set successfully' in key_generate.stdout"
+
+- name: Run database migrations
+  ansible.builtin.command: php artisan migrate --force
+  args:
+    chdir: "{{ app_dir }}"
+  register: migrate_result
+  changed_when: "'Nothing to migrate' not in migrate_result.stdout"
+
+- name: Install NPM dependencies
+  community.general.npm:
+    path: "{{ app_dir }}"
+
+- name: Build front-end assets
+  ansible.builtin.command: npm run build
+  args:
+    chdir: "{{ app_dir }}"
+  register: npm_build
+  changed_when: true
+
+- name: Set ownership of the application directory to www-data
+  ansible.builtin.file:
+    path: "{{ app_dir }}"
+    owner: www-data
+    group: www-data
+    recurse: true
+
+- name: Ensure storage and bootstrap/cache directories are writable
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0775'
+    recurse: true
+  loop:
+    - "{{ app_dir }}/storage"
+    - "{{ app_dir }}/bootstrap/cache"
+
+- name: Deploy Apache virtual host configuration
+  ansible.builtin.template:
+    src: app.conf.j2
+    dest: /etc/apache2/sites-available/app-for-devops.conf
+  notify: restart apache
+
+- name: Disable the default Apache site
+  ansible.builtin.command: a2dissite 000-default.conf
+  args:
+    removes: /etc/apache2/sites-enabled/000-default.conf
+  notify: restart apache
+
+- name: Enable the application Apache site
+  ansible.builtin.command: a2ensite app-for-devops.conf
+  args:
+    creates: /etc/apache2/sites-enabled/app-for-devops.conf
+  notify: restart apache
+
+- name: Ensure Apache is started and enabled
+  ansible.builtin.service:
+    name: apache2
+    state: started
+    enabled: true

@@ -1,0 +1,13 @@
+<VirtualHost *:80>
+    ServerName {{ apache_server_name }}
+    DocumentRoot {{ app_dir }}/public
+
+    <Directory {{ app_dir }}/public>
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/app-for-devops-error.log
+    CustomLog ${APACHE_LOG_DIR}/app-for-devops-access.log combined
+</VirtualHost>

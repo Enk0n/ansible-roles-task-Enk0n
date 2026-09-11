@@ -1,0 +1,8 @@
+---
+# db_host, db_name, db_user, db_pass are expected to be passed via --extra-vars
+app_repo: "https://github.com/Practical-DevOps/app-for-devops.git"
+app_repo_version: main
+app_dir: /var/www/app-for-devops
+apache_server_name: "{{ ansible_host | default(ansible_default_ipv4.address) }}"
+db_port: 5432
+nodejs_major_version: "22"

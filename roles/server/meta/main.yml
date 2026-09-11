@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: server
+  author: Enk0n
+  description: Installs and configures Apache/PHP and deploys the app-for-devops Laravel application
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+  galaxy_tags:
+    - apache
+    - php
+    - laravel
+
+dependencies: []

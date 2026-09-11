@@ -1,1 +1,29 @@
 ---
+# Playbook: install & configure the Laravel app (Apache) and PostgreSQL
+# on two separate Ubuntu 22.04 hosts, defined in the inventory as
+# groups [server] (web/app server) and [db] (database server).
+#
+# Usage:
+#   ansible-playbook main.yml --extra-vars "db_host=db.some.net db_name=app_db db_user=app_user db_pass=app_pass"
+
+- name: Gather facts for every host up-front
+  # The db role needs to know the [server] host's address (for pg_hba.conf)
+  # and vice versa is good practice too. Facts are only gathered for hosts
+  # targeted by a play, so without this pre-pass the db role could see
+  # "ansible_default_ipv4 is undefined" for a [server] host it hasn't
+  # connected to yet.
+  hosts: all
+  gather_facts: true
+  tasks: []
+
+- name: Configure PostgreSQL database server
+  hosts: db
+  become: true
+  roles:
+    - db
+
+- name: Configure Apache web server with the application
+  hosts: server
+  become: true
+  roles:
+    - server
