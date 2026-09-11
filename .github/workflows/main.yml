@@ -27,13 +27,6 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - name: Generate a token
-        id: generate-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - uses: actions/checkout@v6
       - name: Update apt
         run: sudo apt update  
@@ -69,10 +62,4 @@ jobs:
       - name: Test if application uses PostgreSQL
         run: |
           sudo apt-get install postgresql-client -y
-          PGPASSWORD=$DB_PASS psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c '\d' | grep users
-      - name: Final Step
-        env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-        run: |
-          gh repo edit $GITHUB_REPOSITORY --visibility private --accept-visibility-change-consequences
-  
+          PGPASSWORD=$DB_PASS psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c '\d' | grep users  
